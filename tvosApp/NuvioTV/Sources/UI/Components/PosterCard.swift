@@ -1628,13 +1628,14 @@ struct PosterGridCard: View {
 
     @FocusState private var focused: Bool
     @State private var didRequestInitialFocus = false
-    @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
-    @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
-    @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
-    @AppStorage(SettingsKey.cardCornerRadius) private var cardCornerRadiusSetting = AppCardStyle.defaultCornerRadiusRaw
-    @AppStorage(SettingsKey.liquidGlassCards) private var liquidGlassCards = true
-    @AppStorage(SettingsKey.customPosterURLPattern) private var customPosterURLPattern = ""
-    @AppStorage(SettingsKey.customPosterEnabledScreens) private var customPosterEnabledScreens = "all"
+    @Environment(\.cardAppearance) private var gridAppearance
+    private var posterLabels: Bool { gridAppearance.posterLabels }
+    private var smoothFocus: Bool { gridAppearance.smoothFocus }
+    private var focusHighlighter: Bool { gridAppearance.focusHighlighter }
+    private var cardCornerRadiusSetting: String { gridAppearance.cardCornerRadius }
+    private var liquidGlassCards: Bool { gridAppearance.liquidGlassCards }
+    private var customPosterURLPattern: String { gridAppearance.customPosterURLPattern }
+    private var customPosterEnabledScreens: String { gridAppearance.customPosterEnabledScreens }
 
     private var customPosterArtworkURL: String? {
         CustomPosterURLResolver.resolve(
