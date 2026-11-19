@@ -72,4 +72,17 @@ final class AppleTVCapabilityTests: XCTestCase {
         let thirdGen = AppleTVCapability.capability(for: "AppleTV14,1")
         XCTAssertTrue(thirdGen.supportsLiquidGlass)
     }
+
+    func testDisplayCriteriaStayWhenOnlyResolutionChanges() {
+        let held = DisplayCriteriaContinuity.OutputMode(refreshRate: 23.976, dynamicRange: "pq")
+        let nextEpisode = DisplayCriteriaContinuity.OutputMode(refreshRate: 23.976, dynamicRange: "pq")
+        XCTAssertTrue(DisplayCriteriaContinuity.shouldReuseHeldMode(current: held, next: nextEpisode))
+
+        let differentRate = DisplayCriteriaContinuity.OutputMode(refreshRate: 24, dynamicRange: "pq")
+        XCTAssertFalse(DisplayCriteriaContinuity.shouldReuseHeldMode(current: held, next: differentRate))
+
+        let sdr = DisplayCriteriaContinuity.OutputMode(refreshRate: 23.976, dynamicRange: "sdr")
+        XCTAssertFalse(DisplayCriteriaContinuity.shouldReuseHeldMode(current: held, next: sdr))
+        XCTAssertFalse(DisplayCriteriaContinuity.shouldReuseHeldMode(current: nil, next: held))
+    }
 }
