@@ -109,4 +109,64 @@ final class AppleTVCapabilityTests: XCTestCase {
             HardwareAV1Ranking.boost(tags: dolbyAV1, resolution: 2160, preferHardware: true, av1Hardware: true)
         )
     }
+
+    func testPlaybackBudgetStaysGenerousWhenHeadroomIsPlentiful() {
+        let fourGB: UInt64 = 4 * 1_073_741_824
+        let available = 1_200 * 1_024 * 1_024
+        let footprint: UInt64 = 400 * 1_024 * 1_024
+        XCTAssertEqual(
+            PlaybackCacheSettings.resolveAuto(
+                physicalMemoryBytes: fourGB,
+                availableMemoryBytes: available,
+                footprintBytes: footprint
+            ),
+            PlaybackCacheSettings(forwardBuffer: "256MiB", backBuffer: "64MiB")
+        )
+        XCTAssertEqual(
+            PlaybackCacheProfile.resolveAutoSegments(
+                physicalMemoryBytes: fourGB,
+                availableMemoryBytes: available,
+                footprintBytes: footprint
+            ),
+            25
+        )
+        XCTAssertEqual(
+            CatalogImageCacheBudget.posterBytes(
+                physicalMemoryBytes: 8 * 1_073_741_824,
+                availableMemoryBytes: 1_200 * 1_024 * 1_024,
+                allowsLiquidGlass: true
+            ),
+            140 * 1_024 * 1_024
+        )
+    }
+
+    func testPlaybackBudgetStepsDownWhenTheProcessIsNearJetsam() {
+        let eightGB: UInt64 = 8 * 1_073_741_824
+        let available = 400 * 1_024 * 1_024
+        let footprint: UInt64 = 1_200 * 1_024 * 1_024
+        XCTAssertEqual(
+            PlaybackCacheSettings.resolveAuto(
+                physicalMemoryBytes: eightGB,
+                availableMemoryBytes: available,
+                footprintBytes: footprint
+            ),
+            PlaybackCacheSettings(forwardBuffer: "64MiB", backBuffer: "16MiB")
+        )
+        XCTAssertEqual(
+            PlaybackCacheProfile.resolveAutoSegments(
+                physicalMemoryBytes: eightGB,
+                availableMemoryBytes: available,
+                footprintBytes: footprint
+            ),
+            4
+        )
+        XCTAssertLessThan(
+            PlaybackCacheProfile.resolveAutoLeadSeconds(
+                physicalMemoryBytes: eightGB,
+                availableMemoryBytes: available,
+                footprintBytes: footprint
+            ),
+            600
+        )
+    }
 }

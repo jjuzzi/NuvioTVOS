@@ -6,6 +6,7 @@
 //
 
 import CryptoKit
+import Darwin
 import ImageIO
 import SwiftUI
 #if os(tvOS)
@@ -2489,19 +2490,11 @@ struct CachedPosterArtwork<Placeholder: View>: View {
 actor PosterArtworkCache {
     static let shared = PosterArtworkCache()
     private static let tracker = NSCacheMemoryTracker(
-        maxCost: {
-            if !AppleTVCapability.current.supportsLiquidGlass {
-                return 80 * 1024 * 1024 // 80 MB (Apple TV 4K Gen 1 / HD)
-            }
-            let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
-            if gib > 3.5 {
-                return 140 * 1024 * 1024 // 140 MB (Apple TV 4K Gen 2/3)
-            } else if gib > 2.5 {
-                return 100 * 1024 * 1024 // 100 MB
-            } else {
-                return 60 * 1024 * 1024  // 60 MB (Apple TV HD)
-            }
-        }()
+        maxCost: CatalogImageCacheBudget.posterBytes(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            availableMemoryBytes: UInt64(os_proc_available_memory()),
+            allowsLiquidGlass: AppleTVCapability.current.supportsLiquidGlass
+        )
     )
 
     static func telemetryMetrics() -> (count: Int, totalBytes: Int, maxCost: Int) {
@@ -2510,22 +2503,20 @@ actor PosterArtworkCache {
 
     private let cache = NSCache<NSString, UIImage>()
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    private let browsingCostLimit: Int
+    private let browsingCountLimit: Int
+    private var playbackSuspended = false
 
     init() {
-        let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
-        if !AppleTVCapability.current.supportsLiquidGlass {
-            cache.countLimit = 120
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else if gib > 3.5 {
-            cache.countLimit = 220
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else if gib > 2.5 {
-            cache.countLimit = 160
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else {
-            cache.countLimit = 90
-            cache.totalCostLimit = Self.tracker.maxCost
-        }
+        let count = CatalogImageCacheBudget.posterCount(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            availableMemoryBytes: UInt64(os_proc_available_memory()),
+            allowsLiquidGlass: AppleTVCapability.current.supportsLiquidGlass
+        )
+        browsingCountLimit = count
+        browsingCostLimit = Self.tracker.maxCost
+        cache.countLimit = count
+        cache.totalCostLimit = Self.tracker.maxCost
         cache.delegate = Self.tracker
         #if canImport(UIKit)
         NotificationCenter.default.addObserver(
@@ -2543,6 +2534,21 @@ actor PosterArtworkCache {
     func purge() {
         cache.removeAllObjects()
         Self.tracker.reset()
+    }
+
+    /// Drops catalog art while a 4K session is using the process budget, then
+    /// restores the browsing limits so the shelves refill after playback.
+    func setPlaybackSuspended(_ suspended: Bool) {
+        guard playbackSuspended != suspended else { return }
+        playbackSuspended = suspended
+        if suspended {
+            cache.totalCostLimit = min(browsingCostLimit, 32 * 1024 * 1024)
+            cache.countLimit = min(browsingCountLimit, 24)
+            purge()
+        } else {
+            cache.totalCostLimit = browsingCostLimit
+            cache.countLimit = browsingCountLimit
+        }
     }
 
     static func clearAllArtwork() async {
