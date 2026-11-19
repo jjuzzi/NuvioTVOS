@@ -13,6 +13,7 @@ import ImageIO
 import CoreImage
 import AVFoundation
 import AVKit
+import CoreVideo
 
 struct DetailsScreen: View {
     let id: String
@@ -3634,18 +3635,11 @@ enum SmartPlaybackSelector {
                 }
                 return 0
             }()
-            let hardwareBoost: Int
-            if preferHardware, resolution >= 2160, !AppleTVCapability.current.supportsAV1HardwareDecode {
-                if tags.isHardwareAccelerated() {
-                    hardwareBoost = 25_000
-                } else if tags.isAV1 {
-                    hardwareBoost = -25_000
-                } else {
-                    hardwareBoost = 0
-                }
-            } else {
-                hardwareBoost = 0
-            }
+            let hardwareBoost = HardwareAV1Ranking.boost(
+                tags: tags,
+                resolution: resolution,
+                preferHardware: preferHardware
+            )
             return (index, stream, subtitleScore + qualityScore + featureScore + resumeScore + cachedBoost + lowQualityPenalty + hardwareBoost)
         }
 
@@ -4174,7 +4168,8 @@ enum StreamPickerListBuilder {
         // Parse sort facts once per stream, not on every O(n log n) comparison.
         // Keep mode-specific work out of modes that do not use it.
         let needsResolution = !preserveAddonStreams || option == .quality || option == .default || option == .recommended
-        let needsHardwareCheck = option == .quality && !AppleTVCapability.current.supportsAV1HardwareDecode
+        let needsHardwareCheck = option == .quality && !HardwareAV1Ranking.isAvailable
+        let prefersHardwareAV1 = option == .quality && HardwareAV1Ranking.isAvailable
         let preferRecommendedHardware = option == .recommended
             && (ProfileSettings.current.object(forKey: SettingsKey.preferHardwareDecodedStreams) as? Bool ?? true)
         let entries = streams.enumerated().map { entry in
@@ -4259,6 +4254,13 @@ enum StreamPickerListBuilder {
                 let s1 = $1.size
                 if s0 != s1 {
                     return s0 > s1
+                }
+                // Hardware AV1 ranks ahead of other 4K codecs. Dolby Vision stays on HEVC.
+                // Devices without hardware AV1 skip this and keep the check below.
+                if prefersHardwareAV1, res0 >= 2160 {
+                    let rank0 = HardwareAV1Ranking.qualityRank(tags: StreamQualityTags.parse(stream: $0.element))
+                    let rank1 = HardwareAV1Ranking.qualityRank(tags: StreamQualityTags.parse(stream: $1.element))
+                    if rank0 != rank1 { return rank0 > rank1 }
                 }
                 // Tier 4: Hardware decode capability check (Apple TV AV1 decode at 4K)
                 if res0 >= 2160, needsHardwareCheck {
@@ -6343,6 +6345,10 @@ private struct TvDetailsBackdrop: View {
     /// The backdrop blurred once, faded in over the sharp one instead of blurring it live (a
     /// full-screen blur worked out again on every frame).
     @State private var blurredBackdrop: UIImage?
+    /// One blurred frame of the trailer, used while the hero is scrolled so the
+    /// player layer is not blurred on every frame. Until it exists, the player
+    /// keeps the live blur so the picture never snaps sharp.
+    @State private var trailerBlurStill: UIImage?
 
     private var targetArtworkURL: URL? {
         for candidate in [meta.backgroundUrl, meta.landscapePosterUrl, meta.posterUrl] {
@@ -6407,13 +6413,22 @@ private struct TvDetailsBackdrop: View {
                 backdropColor.ignoresSafeArea()
             }
 
+            if blurRadius > 0, let trailerBlurStill {
+                Image(uiImage: trailerBlurStill)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(1.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+
             if let player {
                 TrailerPlayerSurface(player: player) {
                     onTrailerReadyForDisplay?()
                 }
                 .scaleEffect(1.35)
-                .blur(radius: blurRadius, opaque: true)
-                .opacity(isTrailerVisible ? 1 : 0)
+                .blur(radius: trailerBlurStill == nil ? blurRadius : 0, opaque: true)
+                .opacity(isTrailerVisible && (blurRadius == 0 || trailerBlurStill == nil) ? 1 : 0)
                 .animation(.easeInOut(duration: 0.35), value: isTrailerVisible)
                 .animation(.easeInOut(duration: 0.35), value: blurRadius)
                 .ignoresSafeArea()
@@ -6449,6 +6464,36 @@ private struct TvDetailsBackdrop: View {
                 backdropImage = loaded
             }
         }
+        .task(id: "\(meta.id)#\(blurRadius > 0)") {
+            guard blurRadius > 0, let player else {
+                if trailerBlurStill != nil { trailerBlurStill = nil }
+                return
+            }
+            let radius = blurRadius
+            var captured: UIImage?
+            for _ in 0..<6 {
+                if let frame = TrailerFrameGrab.image(from: player) {
+                    captured = frame
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard !Task.isCancelled, blurRadius > 0 else { return }
+            }
+            let source = captured ?? backdropImage
+            guard let source else { return }
+            let frameKey = captured == nil
+                ? (targetArtworkURL?.absoluteString ?? meta.id)
+                : "trailer-frame-\(meta.id)"
+            let still = await PreblurredStill.image(
+                source,
+                key: frameKey,
+                radius: radius,
+                displayedWidth: 1920 * 1.35,
+                maxPixelWidth: 640
+            )
+            guard !Task.isCancelled, blurRadius > 0 else { return }
+            trailerBlurStill = still ?? blurredBackdrop
+        }
         .task(id: BlurredBackdropKey(url: targetArtworkURL, hasImage: backdropImage != nil)) {
             guard let url = targetArtworkURL, let backdropImage else {
                 if blurredBackdrop != nil { blurredBackdrop = nil }
@@ -6477,7 +6522,6 @@ enum TvDetailsBlurredBackdrop {
         cache.countLimit = 12
         return cache
     }()
-    private static let context = CIContext(options: [.cacheIntermediates: false])
 
     static func image(for url: URL, from image: UIImage) async -> UIImage? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
@@ -6489,18 +6533,35 @@ enum TvDetailsBlurredBackdrop {
     }
 
     static func render(_ image: UIImage, screenWidth: CGFloat = 1920) -> UIImage? {
-        guard let cgImage = image.cgImage, cgImage.width > 0, cgImage.height > 0 else { return nil }
-        let scale = min(1, pixelWidth / CGFloat(cgImage.width))
-        let input = CIImage(cgImage: cgImage).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let extent = input.extent.integral
-        // The image is shown filling the screen's width, so a point there is this many pixels here.
-        let pixelsPerPoint = extent.width / screenWidth
-        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
-        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
-        filter.setValue(radius * pixelsPerPoint, forKey: kCIInputRadiusKey)
-        guard let output = filter.outputImage?.cropped(to: extent),
-              let rendered = context.createCGImage(output, from: extent) else { return nil }
-        return UIImage(cgImage: rendered)
+        // Same still the backdrop has always used: 22pt over a screen-width image,
+        // downscaled to 640px before the blur.
+        PreblurredStill.render(
+            image,
+            radius: radius,
+            displayedWidth: screenWidth,
+            maxPixelWidth: pixelWidth
+        )
+    }
+}
+
+/// One frame of a playing trailer, for the scrolled-hero blur still.
+private enum TrailerFrameGrab {
+    static func image(from player: AVPlayer) -> UIImage? {
+        guard let item = player.currentItem else { return nil }
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        item.add(output)
+        defer { item.remove(output) }
+        let time = item.currentTime()
+        guard output.hasNewPixelBuffer(forItemTime: time),
+              let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else {
+            return nil
+        }
+        let ciImage = CIImage(cvPixelBuffer: buffer)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
@@ -7465,6 +7526,7 @@ private struct TvDetailsRelatedRow: View {
     let onFocus: () -> Void
 
     @State private var scrollIndex = 0
+    @Environment(\.cardAppearance) private var cardAppearance
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
     @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
@@ -7499,10 +7561,12 @@ private struct TvDetailsRelatedRow: View {
                         layoutMode: homeLayout,
                         showPosterLabels: posterLabels,
                         smoothFocusAnimations: smoothFocus,
-                        focusHighlighterEnabled: focusHighlighter
+                        focusHighlighterEnabled: focusHighlighter,
+                        renderedAppearance: cardAppearance
                     ) {
                         onSelect(item)
                     }
+                    .equatable()
                     .disabled(
                         focusRequestID.map { $0 != item.id }
                             ?? (entryLocked && index != scrollIndex)

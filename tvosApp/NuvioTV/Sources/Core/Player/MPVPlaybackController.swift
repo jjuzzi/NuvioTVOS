@@ -2774,6 +2774,10 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
     /// Retained across loaded files so an identical episode transition can
     /// reuse the already-requested mode without detaching Vulkan again.
     private var appliedDisplayCriteriaSignature: DisplayCriteriaSignature?
+    /// Frame rate and dynamic range of the criteria on the window. The next
+    /// episode reuses them even when its resolution or codec differs.
+    private var appliedOutputMode: DisplayCriteriaContinuity.OutputMode?
+    private var fallbackOutputMode: DisplayCriteriaContinuity.OutputMode?
     /// Set when the system did not settle and we canceled this signature's
     /// request; identical later files reuse the current/default display mode.
     private var fallbackDisplayCriteriaSignature: DisplayCriteriaSignature?
@@ -3264,10 +3268,14 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
             refreshRate: Float(fps),
             transferFunction: transferFunctionSignature
         )
-        if appliedDisplayCriteriaSignature == signature,
+        let nextMode = DisplayCriteriaContinuity.OutputMode(
+            refreshRate: Float(fps),
+            dynamicRange: transferFunctionSignature
+        )
+        if DisplayCriteriaContinuity.shouldReuseHeldMode(current: appliedOutputMode, next: nextMode),
            displayCriteriaWindow === window {
             didApplyDisplayCriteria = true
-            if fallbackDisplayCriteriaSignature == signature {
+            if fallbackOutputMode == nextMode {
                 setStringProperty("target-prim", "auto")
                 setStringProperty("target-trc", "auto")
                 print("[MPV] Display criteria switch previously timed out; reusing current display mode for identical stream criteria")
@@ -3302,7 +3310,9 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
         )
         displayCriteriaWindow = window
         appliedDisplayCriteriaSignature = signature
+        appliedOutputMode = nextMode
         fallbackDisplayCriteriaSignature = nil
+        fallbackOutputMode = nil
 
         // Give the switch a beat to start before polling for completion.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -3425,7 +3435,9 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
         }
         displayCriteriaWindow = nil
         appliedDisplayCriteriaSignature = nil
+        appliedOutputMode = nil
         fallbackDisplayCriteriaSignature = nil
+        fallbackOutputMode = nil
         didApplyDisplayCriteria = false
         if mpv != nil {
             setStringProperty("target-prim", "auto")
@@ -3460,6 +3472,7 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
         setStringProperty("target-prim", "auto")
         setStringProperty("target-trc", "auto")
         fallbackDisplayCriteriaSignature = appliedDisplayCriteriaSignature
+        fallbackOutputMode = appliedOutputMode
         recordPlaybackSystemDiagnostic(
             "display_switch_timeout seconds=\(Int(Self.displayCriteriaSwitchTimeout)) rendererDetached=true",
             level: .warning
@@ -3514,7 +3527,9 @@ final class MPVPlayerViewController: UIViewController, PlaybackEngineControlling
         displayCriteriaWindow?.avDisplayManager.preferredDisplayCriteria = nil
         displayCriteriaWindow = nil
         appliedDisplayCriteriaSignature = nil
+        appliedOutputMode = nil
         fallbackDisplayCriteriaSignature = nil
+        fallbackOutputMode = nil
         didApplyDisplayCriteria = false
         if mpv != nil {
             setStringProperty("target-prim", "auto")

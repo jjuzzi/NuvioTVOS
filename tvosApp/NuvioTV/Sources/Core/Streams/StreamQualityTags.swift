@@ -1,4 +1,7 @@
 import Foundation
+#if !targetEnvironment(simulator)
+import AetherEngine
+#endif
 
 /// Release quality tier matching Android TV's `DebridStreamQuality`.
 enum DebridStreamQuality: Int, Codable, Comparable, CaseIterable, Sendable {
@@ -63,7 +66,13 @@ struct StreamQualityTags: Equatable, Codable, Sendable {
     /// Returns true if this stream is hardware-accelerated on the provided Apple TV capability profile.
     func isHardwareAccelerated(on capability: AppleTVCapability = .current) -> Bool {
         if isAV1 {
-            return capability.supportsAV1HardwareDecode
+            // Dolby Vision stays on HEVC even where AV1 itself is hardware-decoded.
+            if isDolbyVision { return false }
+            if capability.supportsAV1HardwareDecode { return true }
+            #if !targetEnvironment(simulator)
+            if VTCapabilityProbe.av1Available { return true }
+            #endif
+            return false
         }
         if isHEVC {
             return capability.supportsHEVCHardwareDecode && (resolution == 0 || resolution <= capability.maxResolution)

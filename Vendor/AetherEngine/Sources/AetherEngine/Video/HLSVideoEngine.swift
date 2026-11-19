@@ -1631,8 +1631,9 @@ public final class HLSVideoEngine: @unchecked Sendable {
             category: .session
         )
 
-        // AV1: gated on VTCapabilityProbe.av1Available (false on all current Apple TV chips;
-        // load() routes AV1 to SoftwarePlaybackHost instead). VP9: excluded despite VT HW
+        // AV1: gated on VTCapabilityProbe.av1Available. Apple TV 4K (4th generation, A19)
+        // hardware-decodes AV1; earlier chips report false and stay on the software host.
+        // VP9: excluded despite VT HW
         // decode capability because AVPlayer's HLS manifest parser rejects the `vp09` CODECS
         // attribute; load() routes VP9 to SoftwarePlaybackHost.
         let av1OK = isAV1 && VTCapabilityProbe.av1Available

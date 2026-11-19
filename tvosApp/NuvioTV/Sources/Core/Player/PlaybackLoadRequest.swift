@@ -163,7 +163,8 @@ enum PlaybackCacheProfile: String, Equatable {
         case .auto:
             return Self.resolveAutoSegments(
                 physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
-                availableMemoryBytes: os_proc_available_memory()
+                availableMemoryBytes: os_proc_available_memory(),
+                footprintBytes: PlaybackMemoryBudget.footprintBytes()
             )
         }
     }
@@ -194,42 +195,73 @@ enum PlaybackCacheProfile: String, Equatable {
         case .auto:
             return Self.resolveAutoLeadSeconds(
                 physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
-                availableMemoryBytes: os_proc_available_memory()
+                availableMemoryBytes: os_proc_available_memory(),
+                footprintBytes: PlaybackMemoryBudget.footprintBytes()
             )
         }
     }
 
     /// Dynamically scales Aether forward buffer segments based on live available memory headroom and device physical memory.
     /// Safely bounded to ensure 4K VideoToolbox decoding headroom is preserved without triggering tvOS jetsam kills.
-    static func resolveAutoSegments(physicalMemoryBytes: UInt64, availableMemoryBytes: size_t) -> Int {
+    static func resolveAutoSegments(
+        physicalMemoryBytes: UInt64,
+        availableMemoryBytes: size_t,
+        footprintBytes: UInt64 = 0
+    ) -> Int {
         let gibPhysical = Double(physicalMemoryBytes) / 1_073_741_824.0
         let mbAvailable = Double(availableMemoryBytes) / (1024.0 * 1024.0)
 
+        let ramTier: Int
         if gibPhysical > 3.5 && mbAvailable >= 350 {
-            return 25 // Ultra: ~100s readahead (Gen 3)
+            ramTier = 25 // Ultra: ~100s readahead (Gen 3)
         } else if gibPhysical > 2.5 && mbAvailable >= 250 {
-            return 25 // Max: ~100s readahead (Gen 1/2)
+            ramTier = 25 // Max: ~100s readahead (Gen 1/2)
         } else if mbAvailable >= 150 {
-            return 10 // Medium: ~40s readahead
+            ramTier = 10 // Medium: ~40s readahead
         } else {
-            return 4  // Conservative: ~16s readahead
+            ramTier = 4  // Conservative: ~16s readahead
         }
+        guard let free = PlaybackMemoryBudget.effectiveFreeBytes(
+            availableMemoryBytes: UInt64(availableMemoryBytes),
+            footprintBytes: footprintBytes
+        ) else {
+            return ramTier
+        }
+        let freeMB = Double(free) / (1024.0 * 1024.0)
+        if freeMB >= 512 { return ramTier }
+        if freeMB >= 180 { return min(ramTier, 10) }
+        return min(ramTier, 4)
     }
 
     /// Dynamically scales Hybrid Disk Cache forward buffer lead based on device physical memory and available RAM.
-    static func resolveAutoLeadSeconds(physicalMemoryBytes: UInt64, availableMemoryBytes: size_t) -> Double {
+    static func resolveAutoLeadSeconds(
+        physicalMemoryBytes: UInt64,
+        availableMemoryBytes: size_t,
+        footprintBytes: UInt64 = 0
+    ) -> Double {
         let gibPhysical = Double(physicalMemoryBytes) / 1_073_741_824.0
         let mbAvailable = Double(availableMemoryBytes) / (1024.0 * 1024.0)
 
+        let ramTier: Double
         if gibPhysical > 3.5 && mbAvailable >= 350 {
-            return 600.0 // Ultra: 10 minutes ahead (Gen 3)
+            ramTier = 600.0 // Ultra: 10 minutes ahead (Gen 3)
         } else if gibPhysical > 2.5 && mbAvailable >= 250 {
-            return 240.0 // Max: 4 minutes ahead (Gen 1/2)
+            ramTier = 240.0 // Max: 4 minutes ahead (Gen 1/2)
         } else if mbAvailable >= 150 {
-            return 120.0 // 2 minutes ahead
+            ramTier = 120.0 // 2 minutes ahead
         } else {
-            return 60.0  // 1 minute ahead
+            ramTier = 60.0  // 1 minute ahead
         }
+        guard let free = PlaybackMemoryBudget.effectiveFreeBytes(
+            availableMemoryBytes: UInt64(availableMemoryBytes),
+            footprintBytes: footprintBytes
+        ) else {
+            return ramTier
+        }
+        let freeMB = Double(free) / (1024.0 * 1024.0)
+        if freeMB >= 512 { return ramTier }
+        if freeMB >= 180 { return min(ramTier, 120.0) }
+        return min(ramTier, 60.0)
     }
 }
 

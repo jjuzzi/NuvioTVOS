@@ -6,6 +6,7 @@
 //
 
 import CryptoKit
+import Darwin
 import ImageIO
 import SwiftUI
 #if os(tvOS)
@@ -238,21 +239,27 @@ struct PosterCard: View {
     /// until its turn, the card is empty space of its own size.
     var buildsLater: Bool = false
     var isWatched: Bool? = nil
+    /// Snapshot of card settings from the parent. `.equatable()` cannot see
+    /// `@Environment`, so a parent that rebuilds when settings change passes the
+    /// current appearance here. Nil keeps reading the environment (call sites
+    /// that are not equality-gated).
+    var renderedAppearance: CardAppearance? = nil
     let onClick: () -> Void
 
     private let landscapeTransitionDuration: TimeInterval = 0.3
     @Environment(\.cardAppearance) private var cardAppearance
-    private var customPosterURLPattern: String { cardAppearance.customPosterURLPattern }
-    private var customPosterEnabledScreens: String { cardAppearance.customPosterEnabledScreens }
-    private var cardCornerRadiusSetting: String { cardAppearance.cardCornerRadius }
-    private var liquidGlassCards: Bool { cardAppearance.liquidGlassCards }
-    private var focusedPosterBackdropEnabled: Bool { cardAppearance.focusedPosterBackdropEnabled }
-    private var continueWatchingBlurNextUp: Bool { cardAppearance.continueWatchingBlurNextUp }
-    private var blurUnwatchedEpisodes: Bool { cardAppearance.blurUnwatchedEpisodes }
-    private var hideUnwatchedEpisodeTitles: Bool { cardAppearance.hideUnwatchedEpisodeTitles }
+    private var activeAppearance: CardAppearance { renderedAppearance ?? cardAppearance }
+    private var customPosterURLPattern: String { activeAppearance.customPosterURLPattern }
+    private var customPosterEnabledScreens: String { activeAppearance.customPosterEnabledScreens }
+    private var cardCornerRadiusSetting: String { activeAppearance.cardCornerRadius }
+    private var liquidGlassCards: Bool { activeAppearance.liquidGlassCards }
+    private var focusedPosterBackdropEnabled: Bool { activeAppearance.focusedPosterBackdropEnabled }
+    private var continueWatchingBlurNextUp: Bool { activeAppearance.continueWatchingBlurNextUp }
+    private var blurUnwatchedEpisodes: Bool { activeAppearance.blurUnwatchedEpisodes }
+    private var hideUnwatchedEpisodeTitles: Bool { activeAppearance.hideUnwatchedEpisodeTitles }
 
     private var showsContinueWatchingLabels: Bool {
-        (CardLabelVisibility(rawValue: cardAppearance.continueWatchingLabels) ?? .always)
+        (CardLabelVisibility(rawValue: activeAppearance.continueWatchingLabels) ?? .always)
             .isVisible(isFocused: showsFocusedAppearance)
     }
 
@@ -273,8 +280,8 @@ struct PosterCard: View {
     @FocusState private var isFocused: Bool
     @State private var didRequestInitialFocus = false
     @State private var landscapeArtworkPrepared = false
-    private var trailersEnabled: Bool { cardAppearance.trailersEnabled }
-    private var trailerDelay: Int { cardAppearance.trailerDelay }
+    private var trailersEnabled: Bool { activeAppearance.trailersEnabled }
+    private var trailerDelay: Int { activeAppearance.trailerDelay }
     @AppStorage(SettingsKey.trailerPreviewSound) private var trailerPreviewSound = false
     @State private var isTrailerPreviewActive = false
     @State private var isTrailerPreviewReady = false
@@ -453,6 +460,8 @@ struct PosterCard: View {
                 maximumWidth: artworkDecodeWidth,
                 preloadMaximumWidth: landscapeArtworkDecodeWidth,
                 minimumSwapDelay: 0,
+                staticBlurRadius: shouldBlurNextUpArtwork ? 16 : 0,
+                staticBlurDisplayedWidth: shouldBlurNextUpArtwork ? cardWidth * 1.08 : cardWidth,
                 onPreloadFinished: { succeeded in
                     #if os(tvOS)
                     landscapeArtworkPrepared = succeeded
@@ -470,7 +479,6 @@ struct PosterCard: View {
             }
             .frame(width: cardWidth, height: cardHeight)
             .scaleEffect(shouldBlurNextUpArtwork ? 1.08 : 1.0)
-            .blur(radius: shouldBlurNextUpArtwork ? 16 : 0)
             .clipped()
             #if os(tvOS)
             // Cross-fade the landscape artwork away only once the resolved
@@ -535,7 +543,7 @@ struct PosterCard: View {
                     cornerRadius: cardCornerRadius,
                     isFocused: showsFocusedAppearance,
                     glass: liquidGlassCards,
-                    amoledSurfaces: cardAppearance.amoled && cardAppearance.amoledSurfaces
+                    amoledSurfaces: activeAppearance.amoled && activeAppearance.amoledSurfaces
                 )
             )
             .overlay {
@@ -1171,6 +1179,9 @@ extension PosterCard: Equatable {
             && lhs.meta.tmdbId == rhs.meta.tmdbId
             && lhs.meta.type == rhs.meta.type
             && lhs.meta.trailerYtIds == rhs.meta.trailerYtIds
+            && lhs.meta.posterShape == rhs.meta.posterShape
+            && lhs.meta.backdropUrl == rhs.meta.backdropUrl
+            && lhs.meta.tileShape == rhs.meta.tileShape
             && lhs.isLandscape == rhs.isLandscape
             && lhs.isAlwaysLandscape == rhs.isAlwaysLandscape
             && lhs.tileShape == rhs.tileShape
@@ -1184,6 +1195,9 @@ extension PosterCard: Equatable {
             && lhs.revealNextEpisodeSpoilers == rhs.revealNextEpisodeSpoilers
             && lhs.continueUpNextBadgeText == rhs.continueUpNextBadgeText
             && lhs.showsWatchedBadge == rhs.showsWatchedBadge
+            && lhs.collectionOrigin == rhs.collectionOrigin
+            && lhs.showsAniListOrigin == rhs.showsAniListOrigin
+            && lhs.sourceBadge == rhs.sourceBadge
             && lhs.shouldRequestInitialFocus == rhs.shouldRequestInitialFocus
             && lhs.externalFocusValue == rhs.externalFocusValue
             && lhs.cardIndex == rhs.cardIndex
@@ -1192,6 +1206,7 @@ extension PosterCard: Equatable {
             && (lhs.onPlayManually != nil) == (rhs.onPlayManually != nil)
             && (lhs.onStartFromBeginning != nil) == (rhs.onStartFromBeginning != nil)
             && (lhs.onRemoveFromContinueWatching != nil) == (rhs.onRemoveFromContinueWatching != nil)
+            && (lhs.onRefreshCatalog != nil) == (rhs.onRefreshCatalog != nil)
             && lhs.layoutMode == rhs.layoutMode
             && lhs.showPosterLabels == rhs.showPosterLabels
             && lhs.smoothFocusAnimations == rhs.smoothFocusAnimations
@@ -1201,6 +1216,9 @@ extension PosterCard: Equatable {
             && lhs.focusCallbackContext == rhs.focusCallbackContext
             && lhs.buildsLater == rhs.buildsLater
             && lhs.isWatched == rhs.isWatched
+            && lhs.renderedAppearance == rhs.renderedAppearance
+            && EpisodeShuffle.shared.isActive(seriesID: lhs.meta.id)
+                == EpisodeShuffle.shared.isActive(seriesID: rhs.meta.id)
     }
 }
 
@@ -1612,13 +1630,14 @@ struct PosterGridCard: View {
 
     @FocusState private var focused: Bool
     @State private var didRequestInitialFocus = false
-    @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
-    @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
-    @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
-    @AppStorage(SettingsKey.cardCornerRadius) private var cardCornerRadiusSetting = AppCardStyle.defaultCornerRadiusRaw
-    @AppStorage(SettingsKey.liquidGlassCards) private var liquidGlassCards = true
-    @AppStorage(SettingsKey.customPosterURLPattern) private var customPosterURLPattern = ""
-    @AppStorage(SettingsKey.customPosterEnabledScreens) private var customPosterEnabledScreens = "all"
+    @Environment(\.cardAppearance) private var gridAppearance
+    private var posterLabels: Bool { gridAppearance.posterLabels }
+    private var smoothFocus: Bool { gridAppearance.smoothFocus }
+    private var focusHighlighter: Bool { gridAppearance.focusHighlighter }
+    private var cardCornerRadiusSetting: String { gridAppearance.cardCornerRadius }
+    private var liquidGlassCards: Bool { gridAppearance.liquidGlassCards }
+    private var customPosterURLPattern: String { gridAppearance.customPosterURLPattern }
+    private var customPosterEnabledScreens: String { gridAppearance.customPosterEnabledScreens }
 
     private var customPosterArtworkURL: String? {
         CustomPosterURLResolver.resolve(
@@ -2170,6 +2189,12 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     var maximumWidth: CGFloat? = nil
     var preloadMaximumWidth: CGFloat? = nil
     var minimumSwapDelay: TimeInterval = 0
+    /// When set, the decoded still is blurred once. Until that still is ready the
+    /// view uses a live blur of the same radius, so a spoiler never flashes sharp.
+    var staticBlurRadius: CGFloat = 0
+    /// Point width the blur is measured against, including a scale applied outside
+    /// this view, so the on-screen kernel matches a SwiftUI blur of `staticBlurRadius`.
+    var staticBlurDisplayedWidth: CGFloat? = nil
     var onPreloadFinished: (Bool) -> Void = { _ in }
     var onArtworkLoaded: (String?) -> Void = { _ in }
     @ViewBuilder let placeholder: Placeholder
@@ -2184,6 +2209,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
         maximumWidth: CGFloat? = nil,
         preloadMaximumWidth: CGFloat? = nil,
         minimumSwapDelay: TimeInterval = 0,
+        staticBlurRadius: CGFloat = 0,
+        staticBlurDisplayedWidth: CGFloat? = nil,
         onPreloadFinished: @escaping (Bool) -> Void = { _ in },
         onArtworkLoaded: @escaping (String?) -> Void = { _ in },
         @ViewBuilder placeholder: () -> Placeholder
@@ -2197,6 +2224,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
         self.maximumWidth = maximumWidth
         self.preloadMaximumWidth = preloadMaximumWidth
         self.minimumSwapDelay = minimumSwapDelay
+        self.staticBlurRadius = staticBlurRadius
+        self.staticBlurDisplayedWidth = staticBlurDisplayedWidth
         self.onPreloadFinished = onPreloadFinished
         self.onArtworkLoaded = onArtworkLoaded
         self.placeholder = placeholder()
@@ -2215,6 +2244,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     }
 
     @State private var state = CardArtworkState()
+    @State private var blurredStill: UIImage?
+    @State private var blurredStillKey: String?
 
     private var maxPixelSize: Int {
         let displayScale = UIScreen.main.scale
@@ -2238,19 +2269,41 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     }
 
     var body: some View {
+        let source = displayedImage
+        let stillReady = staticBlurRadius > 0 && blurredStillKey == cacheKey && blurredStill != nil
         ZStack(alignment: .center) {
-            if let image = displayedImage {
+            if let image = stillReady ? blurredStill : source {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: width, height: height, alignment: .center)
                     .clipped()
+                    .blur(radius: staticBlurRadius > 0 && !stillReady ? staticBlurRadius : 0)
             } else {
                 placeholder
             }
         }
         .task(id: cacheKey) {
             await load()
+        }
+        .task(id: "\(cacheKey)#\(staticBlurRadius)#\(source != nil)") {
+            guard staticBlurRadius > 0, let source else {
+                blurredStill = nil
+                blurredStillKey = nil
+                return
+            }
+            let radius = staticBlurRadius
+            let displayed = staticBlurDisplayedWidth ?? width
+            let key = cacheKey
+            let still = await PreblurredStill.image(
+                source,
+                key: key,
+                radius: radius,
+                displayedWidth: max(displayed, 1)
+            )
+            guard !Task.isCancelled, key == cacheKey, radius == staticBlurRadius else { return }
+            blurredStill = still
+            blurredStillKey = still == nil ? nil : key
         }
         .task(id: preloadCacheKey) {
             guard preloadCacheKey != nil else { return }
@@ -2437,19 +2490,11 @@ struct CachedPosterArtwork<Placeholder: View>: View {
 actor PosterArtworkCache {
     static let shared = PosterArtworkCache()
     private static let tracker = NSCacheMemoryTracker(
-        maxCost: {
-            if !AppleTVCapability.current.supportsLiquidGlass {
-                return 80 * 1024 * 1024 // 80 MB (Apple TV 4K Gen 1 / HD)
-            }
-            let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
-            if gib > 3.5 {
-                return 140 * 1024 * 1024 // 140 MB (Apple TV 4K Gen 2/3)
-            } else if gib > 2.5 {
-                return 100 * 1024 * 1024 // 100 MB
-            } else {
-                return 60 * 1024 * 1024  // 60 MB (Apple TV HD)
-            }
-        }()
+        maxCost: CatalogImageCacheBudget.posterBytes(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            availableMemoryBytes: UInt64(os_proc_available_memory()),
+            allowsLiquidGlass: AppleTVCapability.current.supportsLiquidGlass
+        )
     )
 
     static func telemetryMetrics() -> (count: Int, totalBytes: Int, maxCost: Int) {
@@ -2458,22 +2503,20 @@ actor PosterArtworkCache {
 
     private let cache = NSCache<NSString, UIImage>()
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    private let browsingCostLimit: Int
+    private let browsingCountLimit: Int
+    private var playbackSuspended = false
 
     init() {
-        let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
-        if !AppleTVCapability.current.supportsLiquidGlass {
-            cache.countLimit = 120
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else if gib > 3.5 {
-            cache.countLimit = 220
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else if gib > 2.5 {
-            cache.countLimit = 160
-            cache.totalCostLimit = Self.tracker.maxCost
-        } else {
-            cache.countLimit = 90
-            cache.totalCostLimit = Self.tracker.maxCost
-        }
+        let count = CatalogImageCacheBudget.posterCount(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            availableMemoryBytes: UInt64(os_proc_available_memory()),
+            allowsLiquidGlass: AppleTVCapability.current.supportsLiquidGlass
+        )
+        browsingCountLimit = count
+        browsingCostLimit = Self.tracker.maxCost
+        cache.countLimit = count
+        cache.totalCostLimit = Self.tracker.maxCost
         cache.delegate = Self.tracker
         #if canImport(UIKit)
         NotificationCenter.default.addObserver(
@@ -2491,6 +2534,21 @@ actor PosterArtworkCache {
     func purge() {
         cache.removeAllObjects()
         Self.tracker.reset()
+    }
+
+    /// Drops catalog art while a 4K session is using the process budget, then
+    /// restores the browsing limits so the shelves refill after playback.
+    func setPlaybackSuspended(_ suspended: Bool) {
+        guard playbackSuspended != suspended else { return }
+        playbackSuspended = suspended
+        if suspended {
+            cache.totalCostLimit = min(browsingCostLimit, 32 * 1024 * 1024)
+            cache.countLimit = min(browsingCountLimit, 24)
+            purge()
+        } else {
+            cache.totalCostLimit = browsingCostLimit
+            cache.countLimit = browsingCountLimit
+        }
     }
 
     static func clearAllArtwork() async {

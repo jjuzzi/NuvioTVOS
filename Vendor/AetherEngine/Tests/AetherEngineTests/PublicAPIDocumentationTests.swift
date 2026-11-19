@@ -88,6 +88,8 @@ final class PublicAPIDocumentationTests: XCTestCase {
         "closeAuxiliaryScrubExtractorsAndWait": "Nuvio scrub preview extractor synchronous teardown",
         "sourceElType": "Nuvio Dolby Vision enhancement layer query",
         "isDualLayerOutputRouteActive": "Nuvio dual-layer route activity query",
+        "VTCapabilityProbe": "Nuvio reads av1Available; the rest of the probe stays internal",
+        "av1Available": "VideoToolbox AV1 hardware probe shared with Nuvio stream ranking",
     ]
 
     private static let declarationPattern = try! NSRegularExpression(

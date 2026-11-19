@@ -1408,6 +1408,7 @@ class PlayerViewModel: ObservableObject {
         cacheFileIdentity: PlaybackCacheFileIdentity? = nil,
         artworkURL: URL? = nil
     ) {
+        CatalogArtworkMemory.setPlaybackActive(true)
         let frameRateMode = ProfileSettings.current.string(forKey: SettingsKey.frameRateMatching) ?? "Always"
         let matchContent = frameRateMode.caseInsensitiveCompare("Off") != .orderedSame
         let contentId = activeMeta?.imdbId
@@ -4937,6 +4938,7 @@ class PlayerViewModel: ObservableObject {
         skipIntervalLoadTask?.cancel()
         skipIntervalLoadTask = nil
         playerController.pausePlayback()
+        CatalogArtworkMemory.setPlaybackActive(false)
         saveProgress(force: true, eventAction: .pause)
         isAwaitingStreamStart = false
         if preservingPictureInPicture {

@@ -45,23 +45,93 @@ struct PlaybackCacheSettings: Equatable {
     static var auto: PlaybackCacheSettings {
         resolveAuto(
             physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
-            availableMemoryBytes: os_proc_available_memory()
+            availableMemoryBytes: os_proc_available_memory(),
+            footprintBytes: PlaybackMemoryBudget.footprintBytes()
         )
     }
 
-    static func resolveAuto(physicalMemoryBytes: UInt64, availableMemoryBytes: size_t) -> PlaybackCacheSettings {
+    static func resolveAuto(
+        physicalMemoryBytes: UInt64,
+        availableMemoryBytes: size_t,
+        footprintBytes: UInt64 = 0
+    ) -> PlaybackCacheSettings {
         let gibPhysical = Double(physicalMemoryBytes) / 1_073_741_824.0
         let mbAvailable = Double(availableMemoryBytes) / (1024.0 * 1024.0)
 
+        let ramTier: PlaybackCacheSettings
         if gibPhysical > 3.5 && mbAvailable >= 350 {
-            return PlaybackCacheSettings(forwardBuffer: "256MiB", backBuffer: "64MiB")
+            ramTier = PlaybackCacheSettings(forwardBuffer: "256MiB", backBuffer: "64MiB")
         } else if gibPhysical > 2.5 && mbAvailable >= 250 {
-            return PlaybackCacheSettings(forwardBuffer: "256MiB", backBuffer: "64MiB")
+            ramTier = PlaybackCacheSettings(forwardBuffer: "256MiB", backBuffer: "64MiB")
         } else if mbAvailable >= 150 {
-            return PlaybackCacheSettings(forwardBuffer: "128MiB", backBuffer: "32MiB")
+            ramTier = PlaybackCacheSettings(forwardBuffer: "128MiB", backBuffer: "32MiB")
         } else {
-            return PlaybackCacheSettings(forwardBuffer: "64MiB", backBuffer: "16MiB")
+            ramTier = PlaybackCacheSettings(forwardBuffer: "64MiB", backBuffer: "16MiB")
         }
+        return PlaybackMemoryBudget.tightened(ramTier, footprintBytes: footprintBytes, availableMemoryBytes: availableMemoryBytes)
+    }
+}
+
+/// The tvOS process is jetsam-limited near 2 GB even when the box has more RAM.
+/// A zero footprint means the caller did not measure, and the historical tier is kept.
+enum PlaybackMemoryBudget {
+    static let jetsamBytes: UInt64 = 2 * 1_073_741_824
+    /// Room left inside that cap for a 4K HDR decode session besides the cache.
+    static let decodeReserveBytes: UInt64 = 768 * 1_048_576
+
+    static func footprintBytes() -> UInt64 {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return info.phys_footprint
+    }
+
+    /// Bytes still safe to spend on caches. Nil when footprint was not measured.
+    static func effectiveFreeBytes(availableMemoryBytes: UInt64, footprintBytes: UInt64) -> UInt64? {
+        guard footprintBytes > 0 else { return nil }
+        let room = jetsamBytes > footprintBytes &+ decodeReserveBytes
+            ? jetsamBytes &- footprintBytes &- decodeReserveBytes
+            : 0
+        return min(availableMemoryBytes, room)
+    }
+
+    static func tightened(
+        _ tier: PlaybackCacheSettings,
+        footprintBytes: UInt64,
+        availableMemoryBytes: size_t
+    ) -> PlaybackCacheSettings {
+        guard let free = effectiveFreeBytes(
+            availableMemoryBytes: UInt64(availableMemoryBytes),
+            footprintBytes: footprintBytes
+        ) else {
+            return tier
+        }
+        let freeMB = Double(free) / (1024.0 * 1024.0)
+        if freeMB >= 512 { return tier }
+        if freeMB >= 180 {
+            return moreConservative(tier, PlaybackCacheSettings(forwardBuffer: "128MiB", backBuffer: "32MiB"))
+        }
+        return moreConservative(tier, PlaybackCacheSettings(forwardBuffer: "64MiB", backBuffer: "16MiB"))
+    }
+
+    private static func moreConservative(
+        _ current: PlaybackCacheSettings,
+        _ ceiling: PlaybackCacheSettings
+    ) -> PlaybackCacheSettings {
+        let rank: (PlaybackCacheSettings) -> Int = { settings in
+            switch settings.forwardBuffer {
+            case "256MiB": return 3
+            case "192MiB": return 2
+            case "128MiB": return 1
+            default: return 0
+            }
+        }
+        return rank(ceiling) < rank(current) ? ceiling : current
     }
 }
 

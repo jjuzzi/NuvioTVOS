@@ -505,13 +505,14 @@ private struct DiscoverCard: View {
     var onMove: ((MoveCommandDirection) -> Void)? = nil
     let action: () -> Void
     @FocusState private var focused: Bool
-    @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
-    @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
-    @AppStorage(SettingsKey.focusHighlighter) private var focusHighlighter = false
-    @AppStorage(SettingsKey.cardCornerRadius) private var cardCornerRadiusSetting = AppCardStyle.defaultCornerRadiusRaw
-    @AppStorage(SettingsKey.liquidGlassCards) private var liquidGlassCards = true
-    @AppStorage(SettingsKey.customPosterURLPattern) private var customPosterURLPattern = ""
-    @AppStorage(SettingsKey.customPosterEnabledScreens) private var customPosterEnabledScreens = "all"
+    @Environment(\.cardAppearance) private var cardAppearance
+    private var posterLabels: Bool { cardAppearance.posterLabels }
+    private var smoothFocus: Bool { cardAppearance.smoothFocus }
+    private var focusHighlighter: Bool { cardAppearance.focusHighlighter }
+    private var cardCornerRadiusSetting: String { cardAppearance.cardCornerRadius }
+    private var liquidGlassCards: Bool { cardAppearance.liquidGlassCards }
+    private var customPosterURLPattern: String { cardAppearance.customPosterURLPattern }
+    private var customPosterEnabledScreens: String { cardAppearance.customPosterEnabledScreens }
 
     private var customPosterArtworkURL: String? {
         CustomPosterURLResolver.resolve(

@@ -31298,7 +31298,7 @@
     "tvos_settings_prefer_dual_layer_dolby_vision": "Full Dolby Vision P7 FEL (Experimental)",
     "tvos_settings_prefer_dual_layer_dolby_vision_subtitle": "AetherEngine only. When off, Profile 7 FEL uses native hardware decoding with fast single-layer conversion. Turn on for full pixel-level dual-layer composition. Applies next playback.",
     "tvos_settings_prefer_hardware_codecs": "Prefer Hardware Decoded Streams",
-    "tvos_settings_prefer_hardware_codecs_subtitle": "Prioritize HEVC and H.264 streams over AV1 for 4K content to prevent high CPU load (300%+), reduce heat, and ensure native Dolby Vision and HDR support on Apple TV",
+    "tvos_settings_prefer_hardware_codecs_subtitle": "On Apple TVs without hardware AV1, prefer HEVC and H.264 for 4K so playback stays on the hardware decoder. Dolby Vision stays on HEVC. Hardware AV1 is preferred when this Apple TV supports it.",
     "tvos_settings_prefer_links_and_tracks_matching_preferr_cbe68328": "Prefer links and tracks matching Preferred Subtitle",
     "tvos_settings_premiumize": "Premiumize",
     "tvos_settings_premiumize_connected": "Premiumize Connected",

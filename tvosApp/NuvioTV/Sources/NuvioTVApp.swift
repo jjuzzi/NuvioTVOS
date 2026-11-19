@@ -7,6 +7,7 @@
 
 import SwiftUI
 import Combine
+import Darwin
 import Foundation
 import UIKit
 import ImageIO
@@ -4468,16 +4469,10 @@ extension CrossfadingBackdrop: Equatable {
 final class BackdropImageCache: @unchecked Sendable {
     static let shared = BackdropImageCache()
     private static let tracker = NSCacheMemoryTracker(
-        maxCost: {
-            let gib = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
-            if gib > 3.5 {
-                return 96 * 1024 * 1024 // 96 MB (Apple TV 4K Gen 2/3)
-            } else if gib > 2.5 {
-                return 64 * 1024 * 1024 // 64 MB (Apple TV 4K Gen 1)
-            } else {
-                return 40 * 1024 * 1024 // 40 MB (Apple TV HD)
-            }
-        }()
+        maxCost: CatalogImageCacheBudget.backdropBytes(
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory,
+            availableMemoryBytes: UInt64(os_proc_available_memory())
+        )
     )
 
     static func telemetryMetrics() -> (count: Int, totalBytes: Int, maxCost: Int) {
@@ -4487,8 +4482,11 @@ final class BackdropImageCache: @unchecked Sendable {
     private let cache = NSCache<NSString, UIImage>()
     private let lock = NSLock()
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    private let browsingCostLimit: Int
+    private var playbackSuspended = false
 
     init() {
+        browsingCostLimit = Self.tracker.maxCost
         cache.totalCostLimit = Self.tracker.maxCost
         cache.delegate = Self.tracker
         #if canImport(UIKit)
@@ -4507,6 +4505,18 @@ final class BackdropImageCache: @unchecked Sendable {
     func purge() {
         cache.removeAllObjects()
         Self.tracker.reset()
+    }
+
+    /// Drops hero art while playback is active, then restores the browsing limit.
+    func setPlaybackSuspended(_ suspended: Bool) {
+        guard playbackSuspended != suspended else { return }
+        playbackSuspended = suspended
+        if suspended {
+            cache.totalCostLimit = min(browsingCostLimit, 16 * 1024 * 1024)
+            purge()
+        } else {
+            cache.totalCostLimit = browsingCostLimit
+        }
     }
 
     /// The decoded image when it is already in memory. Never downloads.
@@ -6048,6 +6058,7 @@ struct TVHomeView: View {
     /// Opens a card of the Today row on its episode.
     var onOpenCalendarEntry: ((CalendarEntry) -> Void)? = nil
 
+    @Environment(\.cardAppearance) private var cardAppearance
     @AppStorage(SettingsKey.amoled) private var amoled = false
     @AppStorage(SettingsKey.bodyColor) private var bodyColor = SettingsBackground.charcoal.rawValue
     @AppStorage(SettingsKey.homeCalendarToday) private var homeCalendarToday = true
@@ -7431,6 +7442,7 @@ struct TVHomeView: View {
                             TVCatalogRow(
                                 id: section.id,
                                 customPosterScreen: isCalendarToday ? .home : .continueWatching,
+                                renderedAppearance: cardAppearance,
                                 title: section.title,
                                 addonName: section.addonName,
                                 showAddonName: catalogAddonNames,
@@ -8852,6 +8864,7 @@ struct TVHomeView: View {
             TVCatalogRow(
                 id: section.id,
                 customPosterScreen: collectionHome == nil ? .home : .collections,
+                renderedAppearance: cardAppearance,
                 title: section.title,
                 addonName: section.addonName,
                 showAddonName: catalogAddonNames,
