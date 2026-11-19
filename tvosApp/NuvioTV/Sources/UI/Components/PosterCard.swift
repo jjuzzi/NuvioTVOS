@@ -238,21 +238,27 @@ struct PosterCard: View {
     /// until its turn, the card is empty space of its own size.
     var buildsLater: Bool = false
     var isWatched: Bool? = nil
+    /// Snapshot of card settings from the parent. `.equatable()` cannot see
+    /// `@Environment`, so a parent that rebuilds when settings change passes the
+    /// current appearance here. Nil keeps reading the environment (call sites
+    /// that are not equality-gated).
+    var renderedAppearance: CardAppearance? = nil
     let onClick: () -> Void
 
     private let landscapeTransitionDuration: TimeInterval = 0.3
     @Environment(\.cardAppearance) private var cardAppearance
-    private var customPosterURLPattern: String { cardAppearance.customPosterURLPattern }
-    private var customPosterEnabledScreens: String { cardAppearance.customPosterEnabledScreens }
-    private var cardCornerRadiusSetting: String { cardAppearance.cardCornerRadius }
-    private var liquidGlassCards: Bool { cardAppearance.liquidGlassCards }
-    private var focusedPosterBackdropEnabled: Bool { cardAppearance.focusedPosterBackdropEnabled }
-    private var continueWatchingBlurNextUp: Bool { cardAppearance.continueWatchingBlurNextUp }
-    private var blurUnwatchedEpisodes: Bool { cardAppearance.blurUnwatchedEpisodes }
-    private var hideUnwatchedEpisodeTitles: Bool { cardAppearance.hideUnwatchedEpisodeTitles }
+    private var activeAppearance: CardAppearance { renderedAppearance ?? cardAppearance }
+    private var customPosterURLPattern: String { activeAppearance.customPosterURLPattern }
+    private var customPosterEnabledScreens: String { activeAppearance.customPosterEnabledScreens }
+    private var cardCornerRadiusSetting: String { activeAppearance.cardCornerRadius }
+    private var liquidGlassCards: Bool { activeAppearance.liquidGlassCards }
+    private var focusedPosterBackdropEnabled: Bool { activeAppearance.focusedPosterBackdropEnabled }
+    private var continueWatchingBlurNextUp: Bool { activeAppearance.continueWatchingBlurNextUp }
+    private var blurUnwatchedEpisodes: Bool { activeAppearance.blurUnwatchedEpisodes }
+    private var hideUnwatchedEpisodeTitles: Bool { activeAppearance.hideUnwatchedEpisodeTitles }
 
     private var showsContinueWatchingLabels: Bool {
-        (CardLabelVisibility(rawValue: cardAppearance.continueWatchingLabels) ?? .always)
+        (CardLabelVisibility(rawValue: activeAppearance.continueWatchingLabels) ?? .always)
             .isVisible(isFocused: showsFocusedAppearance)
     }
 
@@ -273,8 +279,8 @@ struct PosterCard: View {
     @FocusState private var isFocused: Bool
     @State private var didRequestInitialFocus = false
     @State private var landscapeArtworkPrepared = false
-    private var trailersEnabled: Bool { cardAppearance.trailersEnabled }
-    private var trailerDelay: Int { cardAppearance.trailerDelay }
+    private var trailersEnabled: Bool { activeAppearance.trailersEnabled }
+    private var trailerDelay: Int { activeAppearance.trailerDelay }
     @AppStorage(SettingsKey.trailerPreviewSound) private var trailerPreviewSound = false
     @State private var isTrailerPreviewActive = false
     @State private var isTrailerPreviewReady = false
@@ -535,7 +541,7 @@ struct PosterCard: View {
                     cornerRadius: cardCornerRadius,
                     isFocused: showsFocusedAppearance,
                     glass: liquidGlassCards,
-                    amoledSurfaces: cardAppearance.amoled && cardAppearance.amoledSurfaces
+                    amoledSurfaces: activeAppearance.amoled && activeAppearance.amoledSurfaces
                 )
             )
             .overlay {
@@ -1171,6 +1177,9 @@ extension PosterCard: Equatable {
             && lhs.meta.tmdbId == rhs.meta.tmdbId
             && lhs.meta.type == rhs.meta.type
             && lhs.meta.trailerYtIds == rhs.meta.trailerYtIds
+            && lhs.meta.posterShape == rhs.meta.posterShape
+            && lhs.meta.backdropUrl == rhs.meta.backdropUrl
+            && lhs.meta.tileShape == rhs.meta.tileShape
             && lhs.isLandscape == rhs.isLandscape
             && lhs.isAlwaysLandscape == rhs.isAlwaysLandscape
             && lhs.tileShape == rhs.tileShape
@@ -1184,6 +1193,9 @@ extension PosterCard: Equatable {
             && lhs.revealNextEpisodeSpoilers == rhs.revealNextEpisodeSpoilers
             && lhs.continueUpNextBadgeText == rhs.continueUpNextBadgeText
             && lhs.showsWatchedBadge == rhs.showsWatchedBadge
+            && lhs.collectionOrigin == rhs.collectionOrigin
+            && lhs.showsAniListOrigin == rhs.showsAniListOrigin
+            && lhs.sourceBadge == rhs.sourceBadge
             && lhs.shouldRequestInitialFocus == rhs.shouldRequestInitialFocus
             && lhs.externalFocusValue == rhs.externalFocusValue
             && lhs.cardIndex == rhs.cardIndex
@@ -1192,6 +1204,7 @@ extension PosterCard: Equatable {
             && (lhs.onPlayManually != nil) == (rhs.onPlayManually != nil)
             && (lhs.onStartFromBeginning != nil) == (rhs.onStartFromBeginning != nil)
             && (lhs.onRemoveFromContinueWatching != nil) == (rhs.onRemoveFromContinueWatching != nil)
+            && (lhs.onRefreshCatalog != nil) == (rhs.onRefreshCatalog != nil)
             && lhs.layoutMode == rhs.layoutMode
             && lhs.showPosterLabels == rhs.showPosterLabels
             && lhs.smoothFocusAnimations == rhs.smoothFocusAnimations
@@ -1201,6 +1214,9 @@ extension PosterCard: Equatable {
             && lhs.focusCallbackContext == rhs.focusCallbackContext
             && lhs.buildsLater == rhs.buildsLater
             && lhs.isWatched == rhs.isWatched
+            && lhs.renderedAppearance == rhs.renderedAppearance
+            && EpisodeShuffle.shared.isActive(seriesID: lhs.meta.id)
+                == EpisodeShuffle.shared.isActive(seriesID: rhs.meta.id)
     }
 }
 

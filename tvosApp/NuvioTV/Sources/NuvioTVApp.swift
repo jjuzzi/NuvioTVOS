@@ -6048,6 +6048,7 @@ struct TVHomeView: View {
     /// Opens a card of the Today row on its episode.
     var onOpenCalendarEntry: ((CalendarEntry) -> Void)? = nil
 
+    @Environment(\.cardAppearance) private var cardAppearance
     @AppStorage(SettingsKey.amoled) private var amoled = false
     @AppStorage(SettingsKey.bodyColor) private var bodyColor = SettingsBackground.charcoal.rawValue
     @AppStorage(SettingsKey.homeCalendarToday) private var homeCalendarToday = true
@@ -7431,6 +7432,7 @@ struct TVHomeView: View {
                             TVCatalogRow(
                                 id: section.id,
                                 customPosterScreen: isCalendarToday ? .home : .continueWatching,
+                                renderedAppearance: cardAppearance,
                                 title: section.title,
                                 addonName: section.addonName,
                                 showAddonName: catalogAddonNames,
@@ -8852,6 +8854,7 @@ struct TVHomeView: View {
             TVCatalogRow(
                 id: section.id,
                 customPosterScreen: collectionHome == nil ? .home : .collections,
+                renderedAppearance: cardAppearance,
                 title: section.title,
                 addonName: section.addonName,
                 showAddonName: catalogAddonNames,

@@ -7465,6 +7465,7 @@ private struct TvDetailsRelatedRow: View {
     let onFocus: () -> Void
 
     @State private var scrollIndex = 0
+    @Environment(\.cardAppearance) private var cardAppearance
     @AppStorage(SettingsKey.homeLayout) private var homeLayout = "Modern"
     @AppStorage(SettingsKey.posterLabels) private var posterLabels = false
     @AppStorage(SettingsKey.smoothFocus) private var smoothFocus = true
@@ -7499,10 +7500,12 @@ private struct TvDetailsRelatedRow: View {
                         layoutMode: homeLayout,
                         showPosterLabels: posterLabels,
                         smoothFocusAnimations: smoothFocus,
-                        focusHighlighterEnabled: focusHighlighter
+                        focusHighlighterEnabled: focusHighlighter,
+                        renderedAppearance: cardAppearance
                     ) {
                         onSelect(item)
                     }
+                    .equatable()
                     .disabled(
                         focusRequestID.map { $0 != item.id }
                             ?? (entryLocked && index != scrollIndex)

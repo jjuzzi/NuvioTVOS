@@ -867,6 +867,7 @@ private struct CollectionFolderHomeStyleRow: View {
     private var rowId: String { id }
 
     @State private var scrollIndex: Int = 0
+    @Environment(\.cardAppearance) private var cardAppearance
     @State private var landscapeFocusedId: String?
     @State private var pendingLandscapeFocusedId: String?
     @State private var landscapeFocusTask: Task<Void, Never>?
@@ -976,10 +977,12 @@ private struct CollectionFolderHomeStyleRow: View {
                         layoutMode: rowHomeLayout,
                         showPosterLabels: rowPosterLabels,
                         smoothFocusAnimations: rowSmoothFocus,
-                        focusHighlighterEnabled: rowFocusHighlighter
+                        focusHighlighterEnabled: rowFocusHighlighter,
+                        renderedAppearance: cardAppearance
                     ) {
                         onSelect(item)
                     }
+                    .equatable()
                 }
 
                 if isLoadingMore {

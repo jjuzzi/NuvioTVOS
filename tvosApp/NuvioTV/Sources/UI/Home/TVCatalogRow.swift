@@ -455,6 +455,9 @@ struct TVCatalogRow: View {
     var onRemoveFromContinueWatching: ((ContinueWatchingItem) -> Void)? = nil
     var onRefreshCatalog: (() -> Void)? = nil
     var onMove: ((MoveCommandDirection) -> Void)? = nil
+    /// Card settings observed by Home. Included in equality so a settings change
+    /// rebuilds the row, and each card can skip work when its own inputs match.
+    var renderedAppearance: CardAppearance = CardAppearance()
 
     @State private var scrollIndex: Int?
     @FocusState private var ownCardFocus: String?
@@ -796,10 +799,12 @@ struct TVCatalogRow: View {
                 suppressFocusAnimations: suppressFocusAnimations
             ),
             onMove: onMove,
-            buildsLater: isCardBuildDeferred(itemIndex)
+            buildsLater: isCardBuildDeferred(itemIndex),
+            renderedAppearance: renderedAppearance
         ) {
             onSelect(item)
         }
+        .equatable()
     }
 
     /// A focus-driven sliding offset strip with momentum-blended glide physics. The focused card
@@ -926,6 +931,7 @@ extension TVCatalogRow: Equatable {
               lhs.revealableNextEpisodeMetaIDs == rhs.revealableNextEpisodeMetaIDs,
               lhs.ownsCardFocus == rhs.ownsCardFocus,
               lhs.focusRequest == rhs.focusRequest,
+              lhs.renderedAppearance == rhs.renderedAppearance,
               lhs.items.count == rhs.items.count,
               lhs.progressByItemId.count == rhs.progressByItemId.count,
               lhs.calendarLabelsByItemId == rhs.calendarLabelsByItemId
