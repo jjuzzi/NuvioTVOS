@@ -459,6 +459,8 @@ struct PosterCard: View {
                 maximumWidth: artworkDecodeWidth,
                 preloadMaximumWidth: landscapeArtworkDecodeWidth,
                 minimumSwapDelay: 0,
+                staticBlurRadius: shouldBlurNextUpArtwork ? 16 : 0,
+                staticBlurDisplayedWidth: shouldBlurNextUpArtwork ? cardWidth * 1.08 : cardWidth,
                 onPreloadFinished: { succeeded in
                     #if os(tvOS)
                     landscapeArtworkPrepared = succeeded
@@ -476,7 +478,6 @@ struct PosterCard: View {
             }
             .frame(width: cardWidth, height: cardHeight)
             .scaleEffect(shouldBlurNextUpArtwork ? 1.08 : 1.0)
-            .blur(radius: shouldBlurNextUpArtwork ? 16 : 0)
             .clipped()
             #if os(tvOS)
             // Cross-fade the landscape artwork away only once the resolved
@@ -2187,6 +2188,12 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     var maximumWidth: CGFloat? = nil
     var preloadMaximumWidth: CGFloat? = nil
     var minimumSwapDelay: TimeInterval = 0
+    /// When set, the decoded still is blurred once. Until that still is ready the
+    /// view uses a live blur of the same radius, so a spoiler never flashes sharp.
+    var staticBlurRadius: CGFloat = 0
+    /// Point width the blur is measured against, including a scale applied outside
+    /// this view, so the on-screen kernel matches a SwiftUI blur of `staticBlurRadius`.
+    var staticBlurDisplayedWidth: CGFloat? = nil
     var onPreloadFinished: (Bool) -> Void = { _ in }
     var onArtworkLoaded: (String?) -> Void = { _ in }
     @ViewBuilder let placeholder: Placeholder
@@ -2201,6 +2208,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
         maximumWidth: CGFloat? = nil,
         preloadMaximumWidth: CGFloat? = nil,
         minimumSwapDelay: TimeInterval = 0,
+        staticBlurRadius: CGFloat = 0,
+        staticBlurDisplayedWidth: CGFloat? = nil,
         onPreloadFinished: @escaping (Bool) -> Void = { _ in },
         onArtworkLoaded: @escaping (String?) -> Void = { _ in },
         @ViewBuilder placeholder: () -> Placeholder
@@ -2214,6 +2223,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
         self.maximumWidth = maximumWidth
         self.preloadMaximumWidth = preloadMaximumWidth
         self.minimumSwapDelay = minimumSwapDelay
+        self.staticBlurRadius = staticBlurRadius
+        self.staticBlurDisplayedWidth = staticBlurDisplayedWidth
         self.onPreloadFinished = onPreloadFinished
         self.onArtworkLoaded = onArtworkLoaded
         self.placeholder = placeholder()
@@ -2232,6 +2243,8 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     }
 
     @State private var state = CardArtworkState()
+    @State private var blurredStill: UIImage?
+    @State private var blurredStillKey: String?
 
     private var maxPixelSize: Int {
         let displayScale = UIScreen.main.scale
@@ -2255,19 +2268,41 @@ struct CachedPosterArtwork<Placeholder: View>: View {
     }
 
     var body: some View {
+        let source = displayedImage
+        let stillReady = staticBlurRadius > 0 && blurredStillKey == cacheKey && blurredStill != nil
         ZStack(alignment: .center) {
-            if let image = displayedImage {
+            if let image = stillReady ? blurredStill : source {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: width, height: height, alignment: .center)
                     .clipped()
+                    .blur(radius: staticBlurRadius > 0 && !stillReady ? staticBlurRadius : 0)
             } else {
                 placeholder
             }
         }
         .task(id: cacheKey) {
             await load()
+        }
+        .task(id: "\(cacheKey)#\(staticBlurRadius)#\(source != nil)") {
+            guard staticBlurRadius > 0, let source else {
+                blurredStill = nil
+                blurredStillKey = nil
+                return
+            }
+            let radius = staticBlurRadius
+            let displayed = staticBlurDisplayedWidth ?? width
+            let key = cacheKey
+            let still = await PreblurredStill.image(
+                source,
+                key: key,
+                radius: radius,
+                displayedWidth: max(displayed, 1)
+            )
+            guard !Task.isCancelled, key == cacheKey, radius == staticBlurRadius else { return }
+            blurredStill = still
+            blurredStillKey = still == nil ? nil : key
         }
         .task(id: preloadCacheKey) {
             guard preloadCacheKey != nil else { return }

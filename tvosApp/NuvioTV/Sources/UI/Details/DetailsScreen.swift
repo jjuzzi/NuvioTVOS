@@ -13,6 +13,7 @@ import ImageIO
 import CoreImage
 import AVFoundation
 import AVKit
+import CoreVideo
 
 struct DetailsScreen: View {
     let id: String
@@ -6343,6 +6344,10 @@ private struct TvDetailsBackdrop: View {
     /// The backdrop blurred once, faded in over the sharp one instead of blurring it live (a
     /// full-screen blur worked out again on every frame).
     @State private var blurredBackdrop: UIImage?
+    /// One blurred frame of the trailer, used while the hero is scrolled so the
+    /// player layer is not blurred on every frame. Until it exists, the player
+    /// keeps the live blur so the picture never snaps sharp.
+    @State private var trailerBlurStill: UIImage?
 
     private var targetArtworkURL: URL? {
         for candidate in [meta.backgroundUrl, meta.landscapePosterUrl, meta.posterUrl] {
@@ -6407,13 +6412,22 @@ private struct TvDetailsBackdrop: View {
                 backdropColor.ignoresSafeArea()
             }
 
+            if blurRadius > 0, let trailerBlurStill {
+                Image(uiImage: trailerBlurStill)
+                    .resizable()
+                    .scaledToFill()
+                    .scaleEffect(1.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+
             if let player {
                 TrailerPlayerSurface(player: player) {
                     onTrailerReadyForDisplay?()
                 }
                 .scaleEffect(1.35)
-                .blur(radius: blurRadius, opaque: true)
-                .opacity(isTrailerVisible ? 1 : 0)
+                .blur(radius: trailerBlurStill == nil ? blurRadius : 0, opaque: true)
+                .opacity(isTrailerVisible && (blurRadius == 0 || trailerBlurStill == nil) ? 1 : 0)
                 .animation(.easeInOut(duration: 0.35), value: isTrailerVisible)
                 .animation(.easeInOut(duration: 0.35), value: blurRadius)
                 .ignoresSafeArea()
@@ -6449,6 +6463,33 @@ private struct TvDetailsBackdrop: View {
                 backdropImage = loaded
             }
         }
+        .task(id: blurRadius > 0) {
+            guard blurRadius > 0, let player else {
+                if trailerBlurStill != nil { trailerBlurStill = nil }
+                return
+            }
+            let radius = blurRadius
+            var captured: UIImage?
+            for _ in 0..<6 {
+                if let frame = TrailerFrameGrab.image(from: player) {
+                    captured = frame
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard !Task.isCancelled, blurRadius > 0 else { return }
+            }
+            let source = captured ?? backdropImage
+            guard let source else { return }
+            let still = await PreblurredStill.image(
+                source,
+                key: captured == nil ? (targetArtworkURL?.absoluteString ?? "trailer-backdrop") : "trailer-frame",
+                radius: radius,
+                displayedWidth: 1920 * 1.35,
+                maxPixelWidth: 640
+            )
+            guard !Task.isCancelled, blurRadius > 0 else { return }
+            trailerBlurStill = still ?? blurredBackdrop
+        }
         .task(id: BlurredBackdropKey(url: targetArtworkURL, hasImage: backdropImage != nil)) {
             guard let url = targetArtworkURL, let backdropImage else {
                 if blurredBackdrop != nil { blurredBackdrop = nil }
@@ -6477,7 +6518,6 @@ enum TvDetailsBlurredBackdrop {
         cache.countLimit = 12
         return cache
     }()
-    private static let context = CIContext(options: [.cacheIntermediates: false])
 
     static func image(for url: URL, from image: UIImage) async -> UIImage? {
         if let cached = cache.object(forKey: url as NSURL) { return cached }
@@ -6489,18 +6529,35 @@ enum TvDetailsBlurredBackdrop {
     }
 
     static func render(_ image: UIImage, screenWidth: CGFloat = 1920) -> UIImage? {
-        guard let cgImage = image.cgImage, cgImage.width > 0, cgImage.height > 0 else { return nil }
-        let scale = min(1, pixelWidth / CGFloat(cgImage.width))
-        let input = CIImage(cgImage: cgImage).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let extent = input.extent.integral
-        // The image is shown filling the screen's width, so a point there is this many pixels here.
-        let pixelsPerPoint = extent.width / screenWidth
-        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
-        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
-        filter.setValue(radius * pixelsPerPoint, forKey: kCIInputRadiusKey)
-        guard let output = filter.outputImage?.cropped(to: extent),
-              let rendered = context.createCGImage(output, from: extent) else { return nil }
-        return UIImage(cgImage: rendered)
+        // Same still the backdrop has always used: 22pt over a screen-width image,
+        // downscaled to 640px before the blur.
+        PreblurredStill.render(
+            image,
+            radius: radius,
+            displayedWidth: screenWidth,
+            maxPixelWidth: pixelWidth
+        )
+    }
+}
+
+/// One frame of a playing trailer, for the scrolled-hero blur still.
+private enum TrailerFrameGrab {
+    static func image(from player: AVPlayer) -> UIImage? {
+        guard let item = player.currentItem else { return nil }
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        item.add(output)
+        defer { item.remove(output) }
+        let time = item.currentTime()
+        guard output.hasNewPixelBuffer(forItemTime: time),
+              let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else {
+            return nil
+        }
+        let ciImage = CIImage(cvPixelBuffer: buffer)
+        let context = CIContext(options: [.cacheIntermediates: false])
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
