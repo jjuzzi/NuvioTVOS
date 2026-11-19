@@ -121,6 +121,8 @@ mise install
 
 With an Apple TV simulator booted, run `./scripts/run-mobile.sh tvos s` or build the `NuvioTV` scheme in Xcode.
 
+To build an `.ipa` on a Mac, run `./scripts/build-tvos-ipa.sh`. That produces an unsigned sideload IPA by default, or a development-signed IPA when `TEAM_ID` is set. See [BUILDING.md](./BUILDING.md).
+
 ## Configuration & Tests
 
 Login is optional during development; the default Nuvio backend is configured for QR and email login. Unit tests are in [NuvioTVTests](./tvosApp/NuvioTVTests) and run with `scripts/test-tvos.sh`; UI tests use the separate `NuvioTV-UI` scheme. See the [UI validation notes](./tvosApp/NuvioTVUITests/README.md).
