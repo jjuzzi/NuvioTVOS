@@ -6464,7 +6464,7 @@ private struct TvDetailsBackdrop: View {
                 backdropImage = loaded
             }
         }
-        .task(id: blurRadius > 0) {
+        .task(id: "\(meta.id)#\(blurRadius > 0)") {
             guard blurRadius > 0, let player else {
                 if trailerBlurStill != nil { trailerBlurStill = nil }
                 return
@@ -6481,9 +6481,12 @@ private struct TvDetailsBackdrop: View {
             }
             let source = captured ?? backdropImage
             guard let source else { return }
+            let frameKey = captured == nil
+                ? (targetArtworkURL?.absoluteString ?? meta.id)
+                : "trailer-frame-\(meta.id)"
             let still = await PreblurredStill.image(
                 source,
-                key: captured == nil ? (targetArtworkURL?.absoluteString ?? "trailer-backdrop") : "trailer-frame",
+                key: frameKey,
                 radius: radius,
                 displayedWidth: 1920 * 1.35,
                 maxPixelWidth: 640
