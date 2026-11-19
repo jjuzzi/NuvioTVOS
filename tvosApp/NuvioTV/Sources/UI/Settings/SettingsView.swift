@@ -12463,7 +12463,7 @@ private struct PlaybackSettingsView: View {
 
                 SettingsToggleRow(
                     title: L10n.string("tvos_settings_prefer_hardware_codecs", fallback: "Prefer Hardware Decoded Streams"),
-                    subtitle: L10n.string("tvos_settings_prefer_hardware_codecs_subtitle", fallback: "Prioritize HEVC and H.264 streams over AV1 for 4K content to prevent high CPU load (300%+), reduce heat, and ensure native Dolby Vision and HDR support on Apple TV"),
+                    subtitle: L10n.string("tvos_settings_prefer_hardware_codecs_subtitle", fallback: "On Apple TVs without hardware AV1, prefer HEVC and H.264 for 4K so playback stays on the hardware decoder. Dolby Vision stays on HEVC. Hardware AV1 is preferred when this Apple TV supports it."),
                     isOn: $preferHardwareDecodedStreams,
                     accentColor: accentColor
                 )

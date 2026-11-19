@@ -3635,18 +3635,11 @@ enum SmartPlaybackSelector {
                 }
                 return 0
             }()
-            let hardwareBoost: Int
-            if preferHardware, resolution >= 2160, !AppleTVCapability.current.supportsAV1HardwareDecode {
-                if tags.isHardwareAccelerated() {
-                    hardwareBoost = 25_000
-                } else if tags.isAV1 {
-                    hardwareBoost = -25_000
-                } else {
-                    hardwareBoost = 0
-                }
-            } else {
-                hardwareBoost = 0
-            }
+            let hardwareBoost = HardwareAV1Ranking.boost(
+                tags: tags,
+                resolution: resolution,
+                preferHardware: preferHardware
+            )
             return (index, stream, subtitleScore + qualityScore + featureScore + resumeScore + cachedBoost + lowQualityPenalty + hardwareBoost)
         }
 
@@ -4175,7 +4168,8 @@ enum StreamPickerListBuilder {
         // Parse sort facts once per stream, not on every O(n log n) comparison.
         // Keep mode-specific work out of modes that do not use it.
         let needsResolution = !preserveAddonStreams || option == .quality || option == .default || option == .recommended
-        let needsHardwareCheck = option == .quality && !AppleTVCapability.current.supportsAV1HardwareDecode
+        let needsHardwareCheck = option == .quality && !HardwareAV1Ranking.isAvailable
+        let prefersHardwareAV1 = option == .quality && HardwareAV1Ranking.isAvailable
         let preferRecommendedHardware = option == .recommended
             && (ProfileSettings.current.object(forKey: SettingsKey.preferHardwareDecodedStreams) as? Bool ?? true)
         let entries = streams.enumerated().map { entry in
@@ -4260,6 +4254,13 @@ enum StreamPickerListBuilder {
                 let s1 = $1.size
                 if s0 != s1 {
                     return s0 > s1
+                }
+                // Hardware AV1 ranks ahead of other 4K codecs. Dolby Vision stays on HEVC.
+                // Devices without hardware AV1 skip this and keep the check below.
+                if prefersHardwareAV1, res0 >= 2160 {
+                    let rank0 = HardwareAV1Ranking.qualityRank(tags: StreamQualityTags.parse(stream: $0.element))
+                    let rank1 = HardwareAV1Ranking.qualityRank(tags: StreamQualityTags.parse(stream: $1.element))
+                    if rank0 != rank1 { return rank0 > rank1 }
                 }
                 // Tier 4: Hardware decode capability check (Apple TV AV1 decode at 4K)
                 if res0 >= 2160, needsHardwareCheck {

@@ -85,4 +85,28 @@ final class AppleTVCapabilityTests: XCTestCase {
         XCTAssertFalse(DisplayCriteriaContinuity.shouldReuseHeldMode(current: held, next: sdr))
         XCTAssertFalse(DisplayCriteriaContinuity.shouldReuseHeldMode(current: nil, next: held))
     }
+
+    func testHardwareAV1RankingKeepsTheOldBiasWithoutHardware() {
+        let av1 = StreamQualityTags(resolution: 2160, isAV1: true, isHDR: true)
+        let hevc = StreamQualityTags(resolution: 2160, isHEVC: true, isHDR: true)
+        let dolbyAV1 = StreamQualityTags(resolution: 2160, isDolbyVision: true, isAV1: true)
+        let dolbyHEVC = StreamQualityTags(resolution: 2160, isDolbyVision: true, isHEVC: true)
+
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: hevc, resolution: 2160, preferHardware: true, av1Hardware: false),
+            HardwareAV1Ranking.boost(tags: av1, resolution: 2160, preferHardware: true, av1Hardware: false)
+        )
+        XCTAssertEqual(
+            HardwareAV1Ranking.boost(tags: av1, resolution: 2160, preferHardware: true, av1Hardware: false),
+            -25_000
+        )
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: av1, resolution: 2160, preferHardware: true, av1Hardware: true),
+            HardwareAV1Ranking.boost(tags: hevc, resolution: 2160, preferHardware: true, av1Hardware: true)
+        )
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: dolbyHEVC, resolution: 2160, preferHardware: true, av1Hardware: true),
+            HardwareAV1Ranking.boost(tags: dolbyAV1, resolution: 2160, preferHardware: true, av1Hardware: true)
+        )
+    }
 }

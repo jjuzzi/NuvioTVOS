@@ -671,6 +671,23 @@ final class StreamQualityTagsTests: XCTestCase {
 
         // 4K HEVC should be ranked first on Apple TV without AV1 HW
         XCTAssertEqual(ranked.first?.id, hevcStream.id)
+
+        let av1 = StreamQualityTags(resolution: 2160, isAV1: true, isHDR: true)
+        let hevc = StreamQualityTags(resolution: 2160, isHEVC: true, isHDR: true)
+        let dolbyAV1 = StreamQualityTags(resolution: 2160, isDolbyVision: true, isAV1: true)
+        let dolbyHEVC = StreamQualityTags(resolution: 2160, isDolbyVision: true, isHEVC: true)
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: hevc, resolution: 2160, preferHardware: true, av1Hardware: false),
+            HardwareAV1Ranking.boost(tags: av1, resolution: 2160, preferHardware: true, av1Hardware: false)
+        )
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: av1, resolution: 2160, preferHardware: true, av1Hardware: true),
+            HardwareAV1Ranking.boost(tags: hevc, resolution: 2160, preferHardware: true, av1Hardware: true)
+        )
+        XCTAssertGreaterThan(
+            HardwareAV1Ranking.boost(tags: dolbyHEVC, resolution: 2160, preferHardware: true, av1Hardware: true),
+            HardwareAV1Ranking.boost(tags: dolbyAV1, resolution: 2160, preferHardware: true, av1Hardware: true)
+        )
     }
 
     func testQualitySortPrioritizesHardwareAccelerated4KOnEqualResolution() {
